@@ -2,241 +2,325 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { toast } from 'react-hot-toast';
 
 export interface WebSocketMessage {
-  type: 'connection_established' | 'restaurant_update' | 'system_status' | 'scraping_progress' | 'error' | 'ping';
+  type: string;
   restaurant?: string;
-  update_type?: 'menu' | 'reviews' | 'status';
   data?: any;
   message?: string;
-  error?: string;
+  progress?: number;
   timestamp: string;
+  update_type?: string;
 }
 
 interface UseWebSocketOptions {
-  reconnectInterval?: number;
-  maxReconnectAttempts?: number;
   onMessage?: (message: WebSocketMessage) => void;
   onConnect?: () => void;
   onDisconnect?: () => void;
   onError?: (error: Event) => void;
+  reconnectInterval?: number;
+  maxReconnectAttempts?: number;
+  enableHeartbeat?: boolean;
+  heartbeatInterval?: number;
 }
 
-interface WebSocketState {
-  connected: boolean;
-  connecting: boolean;
+interface UseWebSocketReturn {
+  isConnected: boolean;
+  isConnecting: boolean;
   lastMessage: WebSocketMessage | null;
-  reconnectCount: number;
+  connectionStatus: 'disconnected' | 'connecting' | 'connected' | 'error';
   error: string | null;
+  reconnect: () => void;
+  sendMessage: (message: any) => void;
+  disconnect: () => void;
 }
 
 export const useWebSocket = (
   url?: string,
   options: UseWebSocketOptions = {}
-) => {
+): UseWebSocketReturn => {
   const {
-    reconnectInterval = 5000,
-    maxReconnectAttempts = 10,
     onMessage,
     onConnect,
     onDisconnect,
-    onError
+    onError,
+    reconnectInterval = 5000,
+    maxReconnectAttempts = 10,
+    enableHeartbeat = true,
+    heartbeatInterval = 30000,
   } = options;
 
-  const wsRef = useRef<WebSocket | null>(null);
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const reconnectCountRef = useRef(0);
-  const mountedRef = useRef(true);
-  
-  const [state, setState] = useState<WebSocketState>({
-    connected: false,
-    connecting: false,
-    lastMessage: null,
-    reconnectCount: 0,
-    error: null
-  });
+  const [isConnected, setIsConnected] = useState(false);
+  const [isConnecting, setIsConnecting] = useState(false);
+  const [lastMessage, setLastMessage] = useState<WebSocketMessage | null>(null);
+  const [connectionStatus, setConnectionStatus] = useState<'disconnected' | 'connecting' | 'connected' | 'error'>('disconnected');
+  const [error, setError] = useState<string | null>(null);
 
-  const wsUrl = url || `${process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000'}/ws`;
+  const ws = useRef<WebSocket | null>(null);
+  const reconnectAttempts = useRef(0);
+  const reconnectTimer = useRef<NodeJS.Timeout | null>(null);
+  const heartbeatTimer = useRef<NodeJS.Timeout | null>(null);
+  const lastHeartbeat = useRef<number>(Date.now());
 
-  const disconnect = useCallback(() => {
-    if (reconnectTimeoutRef.current) {
-      clearTimeout(reconnectTimeoutRef.current);
-      reconnectTimeoutRef.current = null;
+  const wsUrl = url || (
+    process.env.NODE_ENV === 'production' 
+      ? `wss://${window.location.host}/ws`
+      : 'ws://localhost:8000/ws'
+  );
+
+  const clearTimers = useCallback(() => {
+    if (reconnectTimer.current) {
+      clearTimeout(reconnectTimer.current);
+      reconnectTimer.current = null;
     }
-
-    if (wsRef.current) {
-      wsRef.current.close(1000, 'Manual disconnect');
-      wsRef.current = null;
-    }
-
-    if (mountedRef.current) {
-      setState({
-        connected: false,
-        connecting: false,
-        lastMessage: null,
-        reconnectCount: 0,
-        error: null
-      });
+    if (heartbeatTimer.current) {
+      clearInterval(heartbeatTimer.current);
+      heartbeatTimer.current = null;
     }
   }, []);
 
+  const startHeartbeat = useCallback(() => {
+    if (!enableHeartbeat) return;
+
+    clearInterval(heartbeatTimer.current!);
+    heartbeatTimer.current = setInterval(() => {
+      if (ws.current?.readyState === WebSocket.OPEN) {
+        const now = Date.now();
+        
+        // Check if we received a recent heartbeat response
+        if (now - lastHeartbeat.current > heartbeatInterval * 2) {
+          console.warn('WebSocket heartbeat timeout - connection may be stale');
+          setConnectionStatus('error');
+          ws.current?.close();
+          return;
+        }
+
+        // Send ping
+        try {
+          ws.current.send(JSON.stringify({ type: 'ping', timestamp: new Date().toISOString() }));
+        } catch (error) {
+          console.error('Error sending heartbeat:', error);
+        }
+      }
+    }, heartbeatInterval);
+  }, [enableHeartbeat, heartbeatInterval]);
+
   const connect = useCallback(() => {
-    if (!mountedRef.current) return;
-    
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
+    if (ws.current?.readyState === WebSocket.OPEN || isConnecting) {
       return;
     }
 
-    setState(prev => ({ ...prev, connecting: true, error: null }));
+    setIsConnecting(true);
+    setConnectionStatus('connecting');
+    setError(null);
 
     try {
-      const ws = new WebSocket(wsUrl);
-      wsRef.current = ws;
+      ws.current = new WebSocket(wsUrl);
 
-      ws.onopen = () => {
-        if (!mountedRef.current) return;
+      ws.current.onopen = () => {
+        console.log('WebSocket connected successfully');
+        setIsConnected(true);
+        setIsConnecting(false);
+        setConnectionStatus('connected');
+        setError(null);
+        reconnectAttempts.current = 0;
+        lastHeartbeat.current = Date.now();
         
-        reconnectCountRef.current = 0;
-        setState(prev => ({
-          ...prev,
-          connected: true,
-          connecting: false,
-          reconnectCount: 0,
-          error: null
-        }));
-        
+        startHeartbeat();
         onConnect?.();
-        console.log('WebSocket connected');
-        toast.success('Connected to real-time updates');
+        
+        toast.success('Connected to live updates', { 
+          icon: '🔗',
+          duration: 3000,
+        });
       };
 
-      ws.onmessage = (event) => {
-        if (!mountedRef.current) return;
-        
+      ws.current.onmessage = (event) => {
         try {
           const message: WebSocketMessage = JSON.parse(event.data);
           
-          setState(prev => ({
-            ...prev,
-            lastMessage: message
-          }));
+          // Update heartbeat on any message
+          lastHeartbeat.current = Date.now();
+          
+          // Handle ping/pong
+          if (message.type === 'ping') {
+            return; // Just update heartbeat timestamp
+          }
+          
+          setLastMessage(message);
+          onMessage?.(message);
 
-          // Handle different message types
+          // Handle specific message types with enhanced notifications
           switch (message.type) {
+            case 'connection_established':
+              console.log('WebSocket connection established');
+              break;
+              
             case 'restaurant_update':
-              if (message.update_type === 'reviews') {
-                toast.success(`New reviews for ${message.restaurant}`);
+              if (message.data?.status === 'completed') {
+                toast.success(`${message.restaurant} data updated`, {
+                  icon: '📊',
+                  duration: 4000,
+                });
+              } else if (message.data?.status === 'error') {
+                toast.error(`Failed to update ${message.restaurant}`, {
+                  icon: '⚠️',
+                  duration: 5000,
+                });
               }
               break;
+              
+            case 'scraping_start':
+              toast.loading(`Updating ${message.restaurant}...`, {
+                icon: '🔄',
+                duration: 2000,
+              });
+              break;
+              
+            case 'scraping_cycle_complete':
+              toast.success('All restaurants updated successfully', {
+                icon: '✅',
+                duration: 4000,
+              });
+              break;
+              
+            case 'system_status':
+              const isRunning = message.data?.is_running;
+              if (isRunning !== undefined) {
+                toast.success(
+                  isRunning ? 'Monitoring started' : 'Monitoring stopped',
+                  { icon: isRunning ? '▶️' : '⏸️', duration: 3000 }
+                );
+              }
+              break;
+              
             case 'error':
-              toast.error(`Error: ${message.error}`);
-              break;
-            case 'scraping_progress':
-              // Handle progress updates silently
-              break;
-            case 'ping':
-              // Handle ping silently
+              toast.error(`System error: ${message.message}`, {
+                icon: '🚨',
+                duration: 6000,
+              });
               break;
           }
-
-          onMessage?.(message);
-        } catch (error) {
-          console.error('Error parsing WebSocket message:', error);
+        } catch (err) {
+          console.error('Error parsing WebSocket message:', err);
+          setError('Invalid message format received');
         }
       };
 
-      ws.onerror = (error) => {
-        if (!mountedRef.current) return;
+      ws.current.onclose = (event) => {
+        console.log('WebSocket disconnected:', event.code, event.reason);
+        setIsConnected(false);
+        setIsConnecting(false);
+        clearTimers();
         
-        console.error('WebSocket error:', error);
-        setState(prev => ({ ...prev, error: 'WebSocket connection error' }));
-        onError?.(error);
-      };
-
-      ws.onclose = (event) => {
-        if (!mountedRef.current) return;
-        
-        console.log('WebSocket closed:', event.code, event.reason);
-        
-        setState(prev => ({
-          ...prev,
-          connected: false,
-          connecting: false
-        }));
-
-        onDisconnect?.();
-
-        // Attempt to reconnect if not manually closed and under max attempts
-        if (event.code !== 1000 && reconnectCountRef.current < maxReconnectAttempts) {
-          reconnectCountRef.current += 1;
+        if (event.code === 1000) {
+          // Normal closure
+          setConnectionStatus('disconnected');
+          onDisconnect?.();
+        } else {
+          // Unexpected closure - attempt reconnect
+          setConnectionStatus('error');
+          setError(`Connection lost (${event.code}): ${event.reason || 'Unknown error'}`);
           
-          setState(prev => ({ 
-            ...prev, 
-            reconnectCount: reconnectCountRef.current 
-          }));
-          
-          reconnectTimeoutRef.current = setTimeout(() => {
-            if (mountedRef.current) {
-              console.log(`Attempting to reconnect... (${reconnectCountRef.current}/${maxReconnectAttempts})`);
+          if (reconnectAttempts.current < maxReconnectAttempts) {
+            const delay = Math.min(reconnectInterval * Math.pow(1.5, reconnectAttempts.current), 30000);
+            console.log(`Attempting to reconnect in ${delay}ms (attempt ${reconnectAttempts.current + 1}/${maxReconnectAttempts})`);
+            
+            reconnectTimer.current = setTimeout(() => {
+              reconnectAttempts.current++;
               connect();
-            }
-          }, reconnectInterval);
-        } else if (reconnectCountRef.current >= maxReconnectAttempts) {
-          setState(prev => ({ 
-            ...prev, 
-            error: 'Max reconnection attempts reached',
-            reconnectCount: reconnectCountRef.current
-          }));
-          toast.error('Lost connection to real-time updates');
+            }, delay);
+            
+            toast.error(
+              `Connection lost. Reconnecting in ${Math.ceil(delay / 1000)}s...`,
+              { icon: '📡', duration: delay }
+            );
+          } else {
+            toast.error('Max reconnection attempts reached. Please refresh the page.', {
+              icon: '🚨',
+              duration: 10000,
+            });
+          }
         }
       };
 
-    } catch (error) {
-      if (!mountedRef.current) return;
-      
-      console.error('Error creating WebSocket connection:', error);
-      setState(prev => ({
-        ...prev,
-        connecting: false,
-        error: 'Failed to create WebSocket connection'
-      }));
+      ws.current.onerror = (event) => {
+        console.error('WebSocket error:', event);
+        setError('WebSocket connection error');
+        setConnectionStatus('error');
+        onError?.(event);
+        
+        toast.error('Connection error occurred', {
+          icon: '⚠️',
+          duration: 4000,
+        });
+      };
+
+    } catch (err) {
+      console.error('Failed to create WebSocket:', err);
+      setError('Failed to establish connection');
+      setIsConnecting(false);
+      setConnectionStatus('error');
     }
-  }, [wsUrl, onConnect, onDisconnect, onError, onMessage, maxReconnectAttempts, reconnectInterval]);
+  }, [wsUrl, isConnecting, onConnect, onMessage, onDisconnect, onError, reconnectInterval, maxReconnectAttempts, startHeartbeat]);
+
+  const disconnect = useCallback(() => {
+    clearTimers();
+    if (ws.current) {
+      ws.current.close(1000, 'Manual disconnect');
+      ws.current = null;
+    }
+    setIsConnected(false);
+    setIsConnecting(false);
+    setConnectionStatus('disconnected');
+    setError(null);
+    reconnectAttempts.current = 0;
+  }, [clearTimers]);
+
+  const reconnect = useCallback(() => {
+    disconnect();
+    setTimeout(connect, 100); // Small delay to ensure cleanup
+  }, [disconnect, connect]);
 
   const sendMessage = useCallback((message: any) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify(message));
-      return true;
+    if (ws.current?.readyState === WebSocket.OPEN) {
+      try {
+        ws.current.send(JSON.stringify(message));
+      } catch (err) {
+        console.error('Error sending message:', err);
+        setError('Failed to send message');
+      }
+    } else {
+      console.warn('WebSocket is not connected');
+      setError('Not connected - message not sent');
     }
-    return false;
   }, []);
 
   // Auto-connect on mount
   useEffect(() => {
-    mountedRef.current = true;
     connect();
-
     return () => {
-      mountedRef.current = false;
+      clearTimers();
       disconnect();
     };
-  }, []); // Empty dependency array - only run on mount/unmount
+  }, []);
 
   // Cleanup on unmount
   useEffect(() => {
     return () => {
-      mountedRef.current = false;
-      if (reconnectTimeoutRef.current) {
-        clearTimeout(reconnectTimeoutRef.current);
+      clearTimers();
+      if (ws.current) {
+        ws.current.close(1000, 'Component unmounting');
       }
-      disconnect();
     };
-  }, [disconnect]);
+  }, [clearTimers]);
 
   return {
-    ...state,
-    connect,
-    disconnect,
+    isConnected,
+    isConnecting,
+    lastMessage,
+    connectionStatus,
+    error,
+    reconnect,
     sendMessage,
-    isConnected: state.connected,
-    isConnecting: state.connecting
+    disconnect,
   };
 };

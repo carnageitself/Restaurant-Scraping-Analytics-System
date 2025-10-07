@@ -1,6 +1,3 @@
-// components/Dashboard.tsx
-'use client';
-
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
@@ -17,39 +14,34 @@ import {
   BarChart3,
   Wifi,
   WifiOff,
-  Server,
-  Database,
   Zap,
   Eye,
   Settings,
-  Bell,
-  ChevronRight,
-  Sparkles,
+  Database,
   Target,
   Globe,
   Star,
   MessageSquare,
-  DollarSign,
-  ShoppingCart,
-  Search,
-  Filter,
-  ExternalLink,
-  MapPin,
-  ArrowUpRight,
-  Calendar,
-  Layers
+  Server,
+  Shield,
+  Monitor,
+  HardDrive,
+  Cpu,
+  Network
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
-import { useWebSocket } from '../hooks/useWebSocket';
 import { useRestaurantStore, useRestaurantSelectors } from '../store/restaurantStore';
-import { format } from 'date-fns';
 import RestaurantList from './RestaurantList';
 import RestaurantDetails from './RestaurantDetails';
 import AnalyticsChart from './AnalyticsChart';
 import RealTimeUpdates from './RealTimeUpdates';
+import ReviewsAnalysis from './ReviewAnalysis';
+
+import RealTimeAnalytics from './RealTimeAnalytics';
+import ScrappingProgresbar from './ScrappingProgressBar';
 
 const Dashboard: React.FC = () => {
-  const [selectedTab, setSelectedTab] = useState<'overview' | 'restaurants' | 'analytics' | 'realtime'>('overview');
+  const [selectedTab, setSelectedTab] = useState<'overview' | 'restaurants' | 'analytics' | 'reviews' | 'realtime'>('overview');
 
   const {
     restaurants,
@@ -72,18 +64,86 @@ const Dashboard: React.FC = () => {
 
   const selectors = useRestaurantSelectors();
 
-  const { isConnected, isConnecting, lastMessage } = useWebSocket(undefined, {
-    onMessage: handleWebSocketMessage,
-    onConnect: () => setConnectionStatus('connected'),
-    onDisconnect: () => setConnectionStatus('disconnected'),
-    onError: () => setConnectionStatus('error'),
-  });
+  // WebSocket connection for real-time updates
+  const [wsConnected, setWsConnected] = useState(false);
+  const [ws, setWs] = useState<WebSocket | null>(null);
 
   useEffect(() => {
-    if (isConnecting) setConnectionStatus('connecting');
-    else if (isConnected) setConnectionStatus('connected');
-    else setConnectionStatus('disconnected');
-  }, [isConnected, isConnecting, setConnectionStatus]);
+    let websocket: WebSocket | null = null;
+    let reconnectTimer: NodeJS.Timeout | null = null;
+
+    const connectWebSocket = () => {
+      try {
+        const wsUrl = process.env.NODE_ENV === 'production' 
+          ? `wss://${window.location.host}/ws`
+          : 'ws://localhost:8000/ws';
+          
+        websocket = new WebSocket(wsUrl);
+
+        websocket.onopen = () => {
+          console.log('WebSocket connected');
+          setWsConnected(true);
+          setConnectionStatus('connected');
+          setWs(websocket);
+          toast.success('Connected to live updates');
+        };
+
+        websocket.onmessage = (event) => {
+          try {
+            const message = JSON.parse(event.data);
+            handleWebSocketMessage(message);
+            
+            // Handle specific message types for real-time progress updates
+            if (message.type === 'scraping_progress') {
+              console.log('Scraping progress update:', message.data);
+            } else if (message.type === 'restaurant_update' && message.data?.status === 'completed') {
+              toast.success(`${message.restaurant} updated`);
+              fetchRestaurants();
+            } else if (message.type === 'scraping_complete') {
+              toast.success('Scraping completed successfully');
+              Promise.all([
+                fetchRestaurants(),
+                fetchAnalyticsSummary(),
+                fetchTrendsData()
+              ]);
+            }
+          } catch (error) {
+            console.error('Error parsing WebSocket message:', error);
+          }
+        };
+
+        websocket.onclose = () => {
+          console.log('WebSocket disconnected');
+          setWsConnected(false);
+          setConnectionStatus('disconnected');
+          setWs(null);
+          
+          // Attempt to reconnect after 5 seconds
+          reconnectTimer = setTimeout(connectWebSocket, 5000);
+        };
+
+        websocket.onerror = (error) => {
+          console.error('WebSocket error:', error);
+          setConnectionStatus('error');
+        };
+
+      } catch (error) {
+        console.error('Failed to create WebSocket connection:', error);
+        setConnectionStatus('error');
+      }
+    };
+
+    connectWebSocket();
+
+    return () => {
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+      }
+      if (websocket) {
+        websocket.close();
+      }
+    };
+  }, [handleWebSocketMessage, setConnectionStatus, fetchRestaurants, fetchAnalyticsSummary, fetchTrendsData]);
 
   useEffect(() => {
     const fetchInitialData = async () => {
@@ -101,15 +161,34 @@ const Dashboard: React.FC = () => {
     };
 
     fetchInitialData();
-    const statusInterval = setInterval(fetchScrapingStatus, 30000);
-    return () => clearInterval(statusInterval);
-  }, [fetchRestaurants, fetchAnalyticsSummary, fetchTrendsData, fetchScrapingStatus]);
+    
+    // Set up periodic refresh for scraping status
+    const statusInterval = setInterval(() => {
+      if (scrapingStatus?.is_running) {
+        fetchScrapingStatus().catch(console.error);
+      }
+    }, 5000);
+    
+    // Refresh data periodically when not scraping
+    const dataInterval = setInterval(() => {
+      if (!scrapingStatus?.is_running) {
+        fetchAnalyticsSummary().catch(console.error);
+        fetchTrendsData().catch(console.error);
+      }
+    }, 60000);
+
+    return () => {
+      clearInterval(statusInterval);
+      clearInterval(dataInterval);
+    };
+  }, [fetchRestaurants, fetchAnalyticsSummary, fetchTrendsData, fetchScrapingStatus, scrapingStatus?.is_running]);
 
   const handleStartScraping = async () => {
     try {
       await startScraping();
-      toast.success('Scraping started');
+      toast.success('Scraping started successfully');
     } catch (error) {
+      console.error('Error starting scraping:', error);
       toast.error('Failed to start scraping');
     }
   };
@@ -119,27 +198,68 @@ const Dashboard: React.FC = () => {
       await stopScraping();
       toast.success('Scraping stopped');
     } catch (error) {
+      console.error('Error stopping scraping:', error);
       toast.error('Failed to stop scraping');
+    }
+  };
+
+  const handlePauseScraping = async () => {
+    try {
+      toast.success('Scraping paused');
+    } catch (error) {
+      toast.error('Failed to pause scraping');
+    }
+  };
+
+  const handleResumeScraping = async () => {
+    try {
+      await startScraping();
+      toast.success('Scraping resumed');
+    } catch (error) {
+      toast.error('Failed to resume scraping');
     }
   };
 
   const handleRefreshData = async () => {
     try {
-      await Promise.all([fetchRestaurants(), fetchAnalyticsSummary(), fetchTrendsData()]);
-      toast.success('Data refreshed');
+      await Promise.all([
+        fetchRestaurants(), 
+        fetchAnalyticsSummary(), 
+        fetchTrendsData()
+      ]);
+      toast.success('Data refreshed successfully');
     } catch (error) {
+      console.error('Error refreshing data:', error);
       toast.error('Failed to refresh data');
     }
   };
 
+  const handleReconnect = () => {
+    window.location.reload();
+  };
+
+  // Calculate top margin for main content when progress indicator is visible
+  const hasActiveProgress = scrapingStatus?.is_running || (scrapingStatus?.progress_percentage && scrapingStatus.progress_percentage > 0);
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50">
-      {/* Premium Header */}
-      <header className="relative bg-white/80 backdrop-blur-xl border-b border-gray-200/50 shadow-sm">
+      {/* Compact Progress Indicator - Fixed at top */}
+      <ScrappingProgresbar
+        isVisible={hasActiveProgress}
+        scrapingStatus={scrapingStatus}
+        onPause={handlePauseScraping}
+        onResume={handleResumeScraping}
+        onStop={handleStopScraping}
+      />
+
+      {/* Header - Add top margin when progress indicator is visible */}
+      <header className={`relative bg-white/80 backdrop-blur-xl border-b border-gray-200/50 shadow-sm transition-all duration-300 ${
+        hasActiveProgress ? 'mt-16' : ''
+      }`}>
         <div className="absolute inset-0 bg-gradient-to-r from-blue-600/5 via-indigo-600/5 to-purple-600/5" />
         <div className="relative max-w-7xl mx-auto px-8 py-6">
           <div className="flex items-center justify-between">
-            {/* Premium Logo & Title */}
+            {/* Logo & Title */}
             <div className="flex items-center space-x-4">
               <motion.div 
                 whileHover={{ rotate: 360, scale: 1.05 }}
@@ -147,7 +267,7 @@ const Dashboard: React.FC = () => {
                 className="relative"
               >
                 <div className="w-14 h-14 bg-gradient-to-br from-blue-600 via-indigo-600 to-purple-600 rounded-2xl flex items-center justify-center shadow-xl shadow-blue-500/25">
-                  <Sparkles className="w-7 h-7 text-white" />
+                  <Database className="w-7 h-7 text-white" />
                 </div>
                 <div className="absolute -inset-1 bg-gradient-to-r from-blue-600 to-purple-600 rounded-2xl blur opacity-30 -z-10" />
               </motion.div>
@@ -156,21 +276,20 @@ const Dashboard: React.FC = () => {
                 <h1 className="text-2xl font-bold bg-gradient-to-r from-gray-900 via-blue-800 to-indigo-800 bg-clip-text text-transparent">
                   Restaurant Intelligence
                 </h1>
-                <p className="text-sm text-gray-600 font-medium mt-0.5">Real-time competitive analysis platform</p>
+                <p className="text-sm text-gray-600 font-medium mt-0.5">Competitive analysis and market insights</p>
               </div>
             </div>
 
-            {/* Professional Status & Controls */}
+            {/* Status & Controls */}
             <div className="flex items-center space-x-6">
-              {/* Enhanced Connection Status */}
+              {/* Connection Status */}
               <div className="flex items-center space-x-3 px-4 py-2.5 bg-white/60 backdrop-blur-sm rounded-xl border border-gray-200/60 shadow-sm">
                 <div className="flex items-center space-x-2">
-                  <div className={`w-2.5 h-2.5 rounded-full ${
-                    connectionStatus === 'connected' ? 'bg-emerald-500 animate-pulse shadow-emerald-500/50 shadow-md' :
-                    connectionStatus === 'connecting' ? 'bg-amber-500 animate-pulse' :
+                  <div className={`w-2.5 h-2.5 rounded-full transition-all duration-300 ${
+                    wsConnected ? 'bg-emerald-500 animate-pulse shadow-emerald-500/50 shadow-md' :
                     'bg-red-500'
                   }`} />
-                  {connectionStatus === 'connected' ? (
+                  {wsConnected ? (
                     <Wifi className="w-4 h-4 text-emerald-600" />
                   ) : (
                     <WifiOff className="w-4 h-4 text-gray-500" />
@@ -178,13 +297,24 @@ const Dashboard: React.FC = () => {
                 </div>
                 <div className="border-l border-gray-300 pl-3">
                   <span className="text-sm font-semibold text-gray-900">
-                    {connectionStatus === 'connected' ? 'Connected' : connectionStatus === 'connecting' ? 'Connecting' : 'Offline'}
+                    {wsConnected ? 'Live' : 'Offline'}
                   </span>
-                  <p className="text-xs text-gray-500">Real-time updates</p>
+                  <p className="text-xs text-gray-500">
+                    {wsConnected ? 'Real-time updates' : 'Reconnecting...'}
+                  </p>
                 </div>
+                
+                {!wsConnected && (
+                  <button
+                    onClick={handleReconnect}
+                    className="ml-2 text-xs text-blue-600 hover:text-blue-800 font-medium transition-colors"
+                  >
+                    Reconnect
+                  </button>
+                )}
               </div>
 
-              {/* Professional Control Buttons */}
+              {/* Control Buttons */}
               <div className="flex items-center space-x-3">
                 {scrapingStatus?.is_running ? (
                   <motion.button
@@ -195,7 +325,7 @@ const Dashboard: React.FC = () => {
                     className="flex items-center space-x-2.5 px-6 py-3 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-xl font-semibold shadow-lg shadow-red-500/25 hover:shadow-xl hover:shadow-red-500/30 transition-all duration-300 disabled:opacity-50"
                   >
                     <PauseCircle className="w-4 h-4" />
-                    <span className="text-sm">Stop Monitoring</span>
+                    <span className="text-sm">Stop</span>
                   </motion.button>
                 ) : (
                   <motion.button
@@ -206,7 +336,7 @@ const Dashboard: React.FC = () => {
                     className="flex items-center space-x-2.5 px-6 py-3 bg-gradient-to-r from-emerald-500 to-emerald-600 text-white rounded-xl font-semibold shadow-lg shadow-emerald-500/25 hover:shadow-xl hover:shadow-emerald-500/30 transition-all duration-300 disabled:opacity-50"
                   >
                     <PlayCircle className="w-4 h-4" />
-                    <span className="text-sm">Start Monitoring</span>
+                    <span className="text-sm">Start</span>
                   </motion.button>
                 )}
                 
@@ -221,7 +351,6 @@ const Dashboard: React.FC = () => {
                   <span className="text-sm">Refresh</span>
                 </motion.button>
 
-                {/* Settings Button */}
                 <motion.button
                   whileHover={{ scale: 1.05, rotate: 90 }}
                   whileTap={{ scale: 0.95 }}
@@ -235,7 +364,7 @@ const Dashboard: React.FC = () => {
         </div>
       </header>
 
-      {/* Enhanced Error Banner */}
+      {/* Error Banner */}
       <AnimatePresence>
         {error && (
           <motion.div
@@ -267,15 +396,16 @@ const Dashboard: React.FC = () => {
         )}
       </AnimatePresence>
 
-      {/* Premium Navigation */}
+      {/* Navigation - Removed Scraping tab */}
       <nav className="bg-white/60 backdrop-blur-sm border-b border-gray-200/50">
         <div className="max-w-7xl mx-auto px-8">
-          <div className="flex space-x-1 py-4">
+          <div className="flex space-x-1 py-4 overflow-x-auto">
             {[
-              { id: 'overview', label: 'Dashboard', icon: Eye, description: 'Key metrics overview' },
-              { id: 'restaurants', label: 'Restaurants', icon: Globe, description: 'Venue management' },
-              { id: 'analytics', label: 'Analytics', icon: TrendingUp, description: 'Performance insights' },
-              { id: 'realtime', label: 'Live Feed', icon: Zap, description: 'Real-time monitoring' },
+              { id: 'overview', label: 'Dashboard', icon: Eye, description: 'Overview & system status' },
+              { id: 'restaurants', label: 'Restaurants', icon: Globe, description: 'Boston venues' },
+              { id: 'analytics', label: 'Analytics', icon: TrendingUp, description: 'Business insights' },
+              { id: 'reviews', label: 'Reviews', icon: MessageSquare, description: 'Sentiment analysis' },
+              { id: 'realtime', label: 'Live Feed', icon: Zap, description: 'Real-time updates' },
             ].map((tab) => {
               const Icon = tab.icon;
               const isActive = selectedTab === tab.id;
@@ -285,7 +415,7 @@ const Dashboard: React.FC = () => {
                   whileHover={{ scale: 1.02, y: -1 }}
                   whileTap={{ scale: 0.98 }}
                   onClick={() => setSelectedTab(tab.id as any)}
-                  className={`group relative flex flex-col items-center space-y-2 px-6 py-4 rounded-xl font-semibold text-sm transition-all duration-300 ${
+                  className={`group relative flex flex-col items-center space-y-2 px-6 py-4 rounded-xl font-semibold text-sm transition-all duration-300 whitespace-nowrap ${
                     isActive
                       ? 'bg-gradient-to-br from-blue-500/10 to-indigo-500/10 text-blue-700 border border-blue-200/50 shadow-lg shadow-blue-500/10'
                       : 'text-gray-600 hover:text-blue-700 hover:bg-blue-50/50'
@@ -309,7 +439,7 @@ const Dashboard: React.FC = () => {
         </div>
       </nav>
 
-      {/* Premium Main Content */}
+      {/* Main Content */}
       <main className="max-w-7xl mx-auto px-8 py-8">
         <AnimatePresence mode="wait">
           {selectedTab === 'overview' && (
@@ -321,47 +451,48 @@ const Dashboard: React.FC = () => {
               transition={{ duration: 0.4, ease: "easeOut" }}
               className="space-y-8"
             >
-              {/* Premium Stats Grid */}
+              {/* Stats Grid */}
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
                 {[
                   { 
-                    title: "Total Restaurants", 
+                    title: "Boston Restaurants", 
                     value: selectors.totalRestaurants.toString(), 
                     icon: Globe, 
                     color: "from-blue-600 to-blue-700", 
                     bgColor: "from-blue-50 to-blue-100",
                     loading: loading.restaurants,
-                    change: "+12%",
-                    changeType: "positive"
+                    change: "Active monitoring",
+                    changeType: "neutral" as const
                   },
                   { 
-                    title: "Active Monitoring", 
+                    title: "Active Data Collection", 
                     value: selectors.recentlyUpdatedRestaurants.toString(), 
                     icon: Activity, 
                     color: "from-emerald-600 to-emerald-700", 
                     bgColor: "from-emerald-50 to-emerald-100",
                     loading: loading.restaurants,
-                    change: "+8%",
-                    changeType: "positive"
+                    change: "Live data",
+                    changeType: "positive" as const
                   },
                   { 
-                    title: "Avg Menu Size", 
+                    title: "Menu Items", 
                     value: Math.round(selectors.avgMenuSize).toString(), 
                     icon: Target, 
                     color: "from-purple-600 to-purple-700", 
                     bgColor: "from-purple-50 to-purple-100",
                     loading: loading.analytics,
-                    change: "-3%",
-                    changeType: "negative"
+                    change: "Per restaurant",
+                    changeType: "neutral" as const
                   },
                   { 
                     title: "System Status", 
-                    value: scrapingStatus?.is_running ? 'Active' : 'Standby', 
+                    value: scrapingStatus?.is_running ? 'Processing' : 'Ready', 
                     icon: scrapingStatus?.is_running ? Zap : Clock, 
                     color: scrapingStatus?.is_running ? "from-emerald-600 to-emerald-700" : "from-gray-600 to-gray-700", 
                     bgColor: scrapingStatus?.is_running ? "from-emerald-50 to-emerald-100" : "from-gray-50 to-gray-100",
                     loading: loading.status,
-                    status: true
+                    change: "Operational",
+                    changeType: "positive" as const
                   }
                 ].map((stat, index) => {
                   const Icon = stat.icon;
@@ -379,11 +510,9 @@ const Dashboard: React.FC = () => {
                       }}
                       className="group relative cursor-pointer"
                     >
-                      {/* Background with hover effect */}
                       <div className="absolute inset-0 bg-gradient-to-br from-white to-gray-50/50 rounded-2xl shadow-lg group-hover:shadow-xl transition-all duration-300" />
                       <div className={`absolute inset-0 bg-gradient-to-br ${stat.bgColor} rounded-2xl opacity-0 group-hover:opacity-100 transition-all duration-300`} />
                       
-                      {/* Content */}
                       <div className="relative p-6 border border-gray-200/50 rounded-2xl bg-white/80 backdrop-blur-sm group-hover:border-gray-300/50 transition-all duration-300">
                         <div className="flex items-start justify-between mb-4">
                           <div className="flex-1">
@@ -394,31 +523,23 @@ const Dashboard: React.FC = () => {
                               <div className="text-3xl font-bold text-gray-900 mb-2">{stat.value}</div>
                             )}
                             
-                            {/* Change indicator */}
                             {stat.change && !stat.loading && (
                               <div className={`flex items-center space-x-1 text-sm font-medium ${
-                                stat.changeType === 'positive' ? 'text-emerald-700' : 'text-red-700'
+                                stat.changeType === 'positive' ? 'text-emerald-700' : 
+                                stat.changeType === 'negative' ? 'text-red-700' : 'text-gray-600'
                               }`}>
                                 {stat.changeType === 'positive' ? (
                                   <TrendingUp className="w-3 h-3" />
-                                ) : (
+                                ) : stat.changeType === 'negative' ? (
                                   <TrendingDown className="w-3 h-3" />
+                                ) : (
+                                  <Activity className="w-3 h-3" />
                                 )}
-                                <span>{stat.change} vs last month</span>
-                              </div>
-                            )}
-                            
-                            {stat.status && !stat.loading && (
-                              <div className="flex items-center space-x-2">
-                                <div className={`w-2 h-2 rounded-full ${scrapingStatus?.is_running ? 'bg-emerald-500 animate-pulse' : 'bg-gray-400'}`} />
-                                <span className="text-sm text-gray-600">
-                                  {scrapingStatus?.is_running ? 'Live monitoring' : 'Standby mode'}
-                                </span>
+                                <span>{stat.change}</span>
                               </div>
                             )}
                           </div>
                           
-                          {/* Icon */}
                           <div className={`p-3 rounded-xl bg-gradient-to-br ${stat.color} shadow-lg group-hover:scale-110 transition-transform duration-300`}>
                             <Icon className="w-6 h-6 text-white" />
                           </div>
@@ -429,207 +550,209 @@ const Dashboard: React.FC = () => {
                 })}
               </div>
 
-              {/* Premium Analytics Overview */}
-              {analyticsSummary && (
-                <motion.div
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.2, duration: 0.5 }}
-                  className="relative overflow-hidden rounded-3xl bg-white/80 backdrop-blur-xl border border-gray-200/50 shadow-xl"
-                >
-                  {/* Gradient overlay */}
-                  <div className="absolute inset-0 bg-gradient-to-br from-blue-50/50 via-indigo-50/50 to-purple-50/50" />
-                  
-                  <div className="relative p-8">
-                    {/* Header */}
-                    <div className="flex items-center justify-between mb-8">
-                      <div>
-                        <h2 className="text-2xl font-bold text-gray-900 mb-2">Intelligence Overview</h2>
-                        <p className="text-gray-600">Comprehensive analytics and insights</p>
-                      </div>
-                      <div className="flex items-center space-x-3 px-4 py-2 bg-white/60 backdrop-blur-sm rounded-xl border border-gray-200/60">
-                        <Database className="w-4 h-4 text-blue-600" />
-                        <span className="text-sm font-medium text-gray-700">Live Data</span>
-                        <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
-                      </div>
-                    </div>
-                    
-                    {/* Main metrics */}
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-10">
-                      {[
-                        {
-                          value: analyticsSummary.total_menu_items.toLocaleString(),
-                          label: "Menu Items Tracked",
-                          color: "from-blue-600 to-blue-700",
-                          icon: Layers
-                        },
-                        {
-                          value: analyticsSummary.total_review_scrapes.toLocaleString(),
-                          label: "Reviews Analyzed",
-                          color: "from-emerald-600 to-emerald-700",
-                          icon: MessageSquare
-                        },
-                        {
-                          value: analyticsSummary.recent_scrapes_24h.toLocaleString(),
-                          label: "Recent Activity",
-                          color: "from-purple-600 to-purple-700",
-                          icon: Activity
-                        }
-                      ].map((metric, index) => {
-                        const Icon = metric.icon;
-                        return (
-                          <motion.div
-                            key={metric.label}
-                            initial={{ opacity: 0, scale: 0.95 }}
-                            animate={{ opacity: 1, scale: 1 }}
-                            transition={{ delay: 0.3 + index * 0.1 }}
-                            className="text-center p-6 bg-white/60 backdrop-blur-sm rounded-2xl border border-gray-200/50 hover:border-gray-300/50 transition-all duration-300"
-                          >
-                            <div className="flex items-center justify-center mb-3">
-                              <div className={`p-2 rounded-lg bg-gradient-to-br ${metric.color}`}>
-                                <Icon className="w-5 h-5 text-white" />
-                              </div>
-                            </div>
-                            <div className={`text-4xl font-bold bg-gradient-to-br ${metric.color} bg-clip-text text-transparent mb-2`}>
-                              {metric.value}
-                            </div>
-                            <p className="text-gray-700 font-medium">{metric.label}</p>
-                          </motion.div>
-                        );
-                      })}
-                    </div>
-                    
-                    {/* Categories section */}
-                    <div>
-                      <div className="flex items-center justify-between mb-6">
-                        <h3 className="text-xl font-bold text-gray-900">Market Categories</h3>
-                        <button className="text-blue-600 hover:text-blue-700 font-medium text-sm flex items-center space-x-1 group">
-                          <span>View all</span>
-                          <ArrowUpRight className="w-4 h-4 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
-                        </button>
-                      </div>
-                      
-                      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-                        {analyticsSummary.top_categories.slice(0, 5).map(([category, count], index) => (
-                          <motion.div
-                            key={category}
-                            initial={{ opacity: 0, scale: 0.9 }}
-                            animate={{ opacity: 1, scale: 1 }}
-                            transition={{ delay: 0.4 + index * 0.05 }}
-                            whileHover={{ scale: 1.05, y: -2 }}
-                            className="group relative overflow-hidden rounded-2xl bg-white/60 backdrop-blur-sm border border-gray-200/50 p-4 hover:border-gray-300/50 hover:shadow-lg transition-all duration-300 cursor-pointer"
-                          >
-                            <div className="text-center">
-                              <div className="text-2xl font-bold text-gray-900 mb-1">{count}</div>
-                              <div className="text-sm text-gray-600 font-medium group-hover:text-gray-800 transition-colors">{category}</div>
-                            </div>
-                            
-                            {/* Hover effect overlay */}
-                            <div className="absolute inset-0 bg-gradient-to-br from-blue-500/5 to-purple-500/5 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-                          </motion.div>
-                        ))}
-                      </div>
-                    </div>
+              {/* System Info */}
+              <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200/50 rounded-2xl p-6">
+                <div className="flex items-center space-x-4">
+                  <div className="p-3 bg-blue-100 rounded-xl">
+                    <Database className="w-6 h-6 text-blue-600" />
                   </div>
-                </motion.div>
-              )}
+                  <div>
+                    <h3 className="text-lg font-semibold text-blue-800">Data Collection System Active</h3>
+                    <p className="text-blue-700">
+                      Monitoring {restaurants.length} Boston restaurants • Real-time menu & review data
+                    </p>
+                  </div>
+                  {wsConnected && (
+                    <div className="flex items-center space-x-2 text-blue-600">
+                      <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse" />
+                      <span className="text-sm font-medium">Live Updates</span>
+                    </div>
+                  )}
+                </div>
+              </div>
 
-              {/* Premium Restaurant Feed */}
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.3, duration: 0.5 }}
-                className="relative overflow-hidden rounded-3xl bg-white/80 backdrop-blur-xl border border-gray-200/50 shadow-xl"
-              >
-                <div className="absolute inset-0 bg-gradient-to-br from-emerald-50/30 via-blue-50/30 to-purple-50/30" />
-                
-                <div className="relative">
-                  {/* Header */}
-                  <div className="p-6 border-b border-gray-200/50">
+              {/* Data Collection System Status - Integrated Scraping Content */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                {/* System Performance */}
+                <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+                  <h3 className="text-lg font-bold mb-6 flex items-center">
+                    <Monitor className="w-5 h-5 mr-2 text-green-500" />
+                    System Performance
+                  </h3>
+                  <div className="space-y-4">
                     <div className="flex items-center justify-between">
-                      <div>
-                        <h2 className="text-xl font-bold text-gray-900 mb-1">Live Restaurant Feed</h2>
-                        <p className="text-gray-600 text-sm">Real-time monitoring status</p>
-                      </div>
-                      <button className="flex items-center space-x-2 text-blue-600 hover:text-blue-700 font-medium group">
-                        <span>View all restaurants</span>
-                        <ChevronRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-                      </button>
+                      <span className="text-gray-600">Connection Status</span>
+                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                        wsConnected ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                      }`}>
+                        {wsConnected ? 'Connected' : 'Disconnected'}
+                      </span>
                     </div>
-                  </div>
-                  
-                  {/* Restaurant list */}
-                  <div className="divide-y divide-gray-200/50">
-                    {restaurants.slice(0, 6).map((restaurant, index) => (
-                      <motion.div
-                        key={restaurant.name}
-                        initial={{ opacity: 0, x: -20 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: 0.4 + index * 0.05 }}
-                        className="p-6 hover:bg-gray-50/50 transition-all duration-300 cursor-pointer group"
-                      >
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center space-x-4">
-                            {/* Restaurant avatar */}
-                            <div className="relative">
-                              <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-purple-600 rounded-2xl flex items-center justify-center text-white font-bold text-lg shadow-lg group-hover:shadow-xl transition-shadow duration-300">
-                                {restaurant.name.charAt(0)}
-                              </div>
-                              <div className={`absolute -bottom-1 -right-1 w-4 h-4 border-2 border-white rounded-full ${
-                                restaurant.reviews_last_scraped && 
-                                new Date(restaurant.reviews_last_scraped) > new Date(Date.now() - 60 * 60 * 1000) 
-                                  ? 'bg-emerald-500 animate-pulse' 
-                                  : 'bg-gray-400'
-                              }`} />
-                            </div>
-                            
-                            {/* Restaurant info */}
-                            <div>
-                              <h3 className="font-semibold text-gray-900 group-hover:text-blue-700 transition-colors mb-1">
-                                {restaurant.name}
-                              </h3>
-                              <div className="flex items-center space-x-4 text-sm text-gray-600">
-                                <div className="flex items-center space-x-1">
-                                  <Layers className="w-3 h-3" />
-                                  <span>{restaurant.menu_items_count} items</span>
-                                </div>
-                                <div className="flex items-center space-x-1">
-                                  <BarChart3 className="w-3 h-3" />
-                                  <span>{restaurant.categories_count} categories</span>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                          
-                          {/* Status and time */}
-                          <div className="text-right">
-                            <div className="flex items-center justify-end space-x-2 mb-2">
-                              <Clock className="w-3 h-3 text-gray-500" />
-                              <span className="text-xs text-gray-500 font-medium">
-                                {restaurant.reviews_last_scraped ? 
-                                  format(new Date(restaurant.reviews_last_scraped), 'MMM dd, HH:mm') : 
-                                  'Never updated'
-                                }
-                              </span>
-                            </div>
-                            
-                            {restaurant.review_sources_count > 0 ? (
-                              <div className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 border border-emerald-200">
-                                <Star className="w-3 h-3 mr-1" />
-                                {restaurant.review_sources_count} sources
-                              </div>
-                            ) : (
-                              <div className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-gray-100 text-gray-600 border border-gray-200">
-                                No sources
-                              </div>
-                            )}
-                          </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-gray-600">Data Collection</span>
+                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                        scrapingStatus?.is_running ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-800'
+                      }`}>
+                        {scrapingStatus?.is_running ? 'Active' : 'Idle'}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-gray-600">Last Update</span>
+                      <span className="text-sm text-gray-900">
+                        {trendsData?.generated_at ? 
+                          new Date(trendsData.generated_at).toLocaleTimeString() : 
+                          'Loading...'
+                        }
+                      </span>
+                    </div>
+                    {scrapingStatus?.progress_percentage !== undefined && scrapingStatus.progress_percentage > 0 && (
+                      <div>
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-gray-600">Progress</span>
+                          <span className="text-sm text-gray-900">
+                            {Math.round(scrapingStatus.progress_percentage)}%
+                          </span>
                         </div>
-                      </motion.div>
-                    ))}
+                        <div className="w-full bg-gray-200 rounded-full h-2">
+                          <div 
+                            className="bg-blue-500 h-2 rounded-full transition-all duration-500"
+                            style={{ width: `${scrapingStatus.progress_percentage}%` }}
+                          />
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
-              </motion.div>
+
+                {/* Data Collection Stats */}
+                <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+                  <h3 className="text-lg font-bold mb-6 flex items-center">
+                    <HardDrive className="w-5 h-5 mr-2 text-purple-500" />
+                    Data Collection Stats
+                  </h3>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="text-center p-4 bg-blue-50 rounded-lg">
+                      <div className="flex items-center justify-center mb-2">
+                        <Globe className="w-5 h-5 text-blue-600" />
+                      </div>
+                      <p className="text-2xl font-bold text-blue-600">
+                        {restaurants.length}
+                      </p>
+                      <p className="text-sm text-gray-600">Restaurants</p>
+                    </div>
+                    
+                    <div className="text-center p-4 bg-green-50 rounded-lg">
+                      <div className="flex items-center justify-center mb-2">
+                        <Target className="w-5 h-5 text-green-600" />
+                      </div>
+                      <p className="text-2xl font-bold text-green-600">
+                        {restaurants.reduce((sum, r) => sum + r.menu_items_count, 0)}
+                      </p>
+                      <p className="text-sm text-gray-600">Menu Items</p>
+                    </div>
+                    
+                    <div className="text-center p-4 bg-purple-50 rounded-lg">
+                      <div className="flex items-center justify-center mb-2">
+                        <Star className="w-5 h-5 text-purple-600" />
+                      </div>
+                      <p className="text-2xl font-bold text-purple-600">
+                        {restaurants.reduce((sum, r) => sum + r.review_sources_count, 0)}
+                      </p>
+                      <p className="text-sm text-gray-600">Review Sources</p>
+                    </div>
+                    
+                    <div className="text-center p-4 bg-orange-50 rounded-lg">
+                      <div className="flex items-center justify-center mb-2">
+                        <Activity className="w-5 h-5 text-orange-600" />
+                      </div>
+                      <p className="text-2xl font-bold text-orange-600">
+                        {restaurants.filter(r => r.reviews_last_scraped && 
+                          new Date(r.reviews_last_scraped) > new Date(Date.now() - 24 * 60 * 60 * 1000)
+                        ).length}
+                      </p>
+                      <p className="text-sm text-gray-600">Active (24h)</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* System Infrastructure Status */}
+              <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+                <h3 className="text-lg font-bold mb-6 flex items-center">
+                  <Server className="w-5 h-5 mr-2 text-blue-500" />
+                  Infrastructure Status
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <div className="flex items-center space-x-4 p-4 bg-gray-50 rounded-lg">
+                    <div className={`p-2 rounded-lg ${wsConnected ? 'bg-green-100' : 'bg-red-100'}`}>
+                      <Network className={`w-5 h-5 ${wsConnected ? 'text-green-600' : 'text-red-600'}`} />
+                    </div>
+                    <div>
+                      <p className="font-semibold text-gray-900">WebSocket</p>
+                      <p className={`text-sm ${wsConnected ? 'text-green-600' : 'text-red-600'}`}>
+                        {wsConnected ? 'Connected' : 'Disconnected'}
+                      </p>
+                    </div>
+                  </div>
+                  
+                  <div className="flex items-center space-x-4 p-4 bg-gray-50 rounded-lg">
+                    <div className="p-2 bg-blue-100 rounded-lg">
+                      <Cpu className="w-5 h-5 text-blue-600" />
+                    </div>
+                    <div>
+                      <p className="font-semibold text-gray-900">Processing</p>
+                      <p className="text-sm text-blue-600">
+                        {scrapingStatus?.is_running ? 'Active' : 'Idle'}
+                      </p>
+                    </div>
+                  </div>
+                  
+                  <div className="flex items-center space-x-4 p-4 bg-gray-50 rounded-lg">
+                    <div className="p-2 bg-purple-100 rounded-lg">
+                      <Shield className="w-5 h-5 text-purple-600" />
+                    </div>
+                    <div>
+                      <p className="font-semibold text-gray-900">Security</p>
+                      <p className="text-sm text-purple-600">Secured</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Analytics Charts */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                <AnalyticsChart data={trendsData} loading={loading.trends} />
+                
+                {/* Recent Activity */}
+                <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+                  <h3 className="text-lg font-bold mb-6 flex items-center">
+                    <Activity className="w-5 h-5 mr-2 text-green-500" />
+                    Recent Activity
+                  </h3>
+                  <div className="space-y-4">
+                    {restaurants
+                      .filter(r => r.reviews_last_scraped)
+                      .sort((a, b) => new Date(b.reviews_last_scraped!).getTime() - new Date(a.reviews_last_scraped!).getTime())
+                      .slice(0, 5)
+                      .map((restaurant, index) => (
+                        <div key={restaurant.name} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                          <div className="flex items-center space-x-3">
+                            <div className="w-3 h-3 bg-green-500 rounded-full" />
+                            <div>
+                              <p className="font-medium text-gray-900">{restaurant.name}</p>
+                              <p className="text-sm text-gray-600">
+                                {restaurant.menu_items_count} items • {restaurant.review_sources_count} sources
+                              </p>
+                            </div>
+                          </div>
+                          <span className="text-sm text-gray-500">
+                            {new Date(restaurant.reviews_last_scraped!).toLocaleDateString()}
+                          </span>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              </div>
             </motion.div>
           )}
 
@@ -653,7 +776,19 @@ const Dashboard: React.FC = () => {
               exit={{ opacity: 0, y: -20 }}
               transition={{ duration: 0.4 }}
             >
-              <AnalyticsChart data={trendsData} loading={loading.trends} />
+              <RealTimeAnalytics loading={loading.analytics} />
+            </motion.div>
+          )}
+
+          {selectedTab === 'reviews' && (
+            <motion.div
+              key="reviews"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              transition={{ duration: 0.4 }}
+            >
+              <ReviewsAnalysis />
             </motion.div>
           )}
 
