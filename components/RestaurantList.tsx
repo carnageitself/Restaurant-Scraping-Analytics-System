@@ -28,11 +28,78 @@ import {
 import { toast } from 'react-hot-toast';
 import { useRestaurantStore } from '../store/restaurantStore';
 
+// Type definitions
+interface Restaurant {
+  name: string;
+  url?: string;
+  address?: string;
+  updated_at?: string;
+  menu_items_count?: number;
+  categories_count?: number;
+  menu_last_scraped?: string;
+  review_sources_count?: number;
+  reviews_last_scraped?: string;
+  google_rating?: number;
+  yelp_rating?: number;
+  total_reviews?: number;
+  sentiment_score?: number | null;
+}
+
+interface DeliveryPlatform {
+  available: boolean;
+  rating?: number;
+  reviews?: string;
+  url?: string;
+}
+
+interface ReviewPlatform {
+  rating?: number;
+  reviewCount?: number;
+  url: string;
+  ranking?: string;
+}
+
+interface RestaurantDetails {
+  name: string;
+  address: string;
+  phone: string;
+  email?: string;
+  website: string;
+  established?: number | string;
+  ownershipType?: string;
+  cuisineType: string;
+  priceRange: string;
+  description: string;
+  businessHours: { [key: string]: string };
+  deliveryPlatforms: { [key: string]: DeliveryPlatform };
+  reviewPlatforms: { [key: string]: ReviewPlatform };
+  features: string[];
+  popularDishes: string[];
+  awards: string[];
+  capacity?: number;
+  averageWaitTime?: string;
+  menu_items_count?: number;
+  categories_count?: number;
+  review_sources_count?: number;
+  reviews_last_scraped?: string;
+  sentiment_score?: number | null;
+}
+
+// Helper functions for safe number handling
+const safeNumber = (value: number | undefined | null): number => {
+  return typeof value === 'number' && !isNaN(value) ? value : 0;
+};
+
+const safeLocaleString = (value: number | undefined | null): string => {
+  const num = safeNumber(value);
+  return num.toLocaleString();
+};
+
 const RestaurantList: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterBy, setFilterBy] = useState<'all' | 'active' | 'inactive'>('all');
   const [sortBy, setSortBy] = useState<'name' | 'updated' | 'items' | 'sources'>('updated');
-  const [selectedRestaurant, setSelectedRestaurant] = useState<any | null>(null);
+  const [selectedRestaurant, setSelectedRestaurant] = useState<RestaurantDetails | null>(null);
 
   const {
     restaurants,
@@ -42,9 +109,9 @@ const RestaurantList: React.FC = () => {
   } = useRestaurantStore();
 
   // Enhanced restaurant data mapping from the Boston directory
-  const getRestaurantDetails = (restaurant: any) => {
-    const restaurantData: { [key: string]: any } = {
-      "India Quality Restaurant": {
+  const getRestaurantDetails = (restaurant: Restaurant): RestaurantDetails => {
+    const restaurantData: { [key: string]: Partial<RestaurantDetails> } = {
+      "India Quality": {
         address: "484 Commonwealth Avenue, Boston, MA 02215",
         phone: "(617) 267-4499",
         email: "indiaquality@yahoo.com",
@@ -60,9 +127,9 @@ const RestaurantList: React.FC = () => {
         },
         deliveryPlatforms: {
           doordash: { available: true, rating: 4.5, reviews: "7,000+", url: "doordash.com/store/india-quality-restaurant-boston-1215/" },
-          ubereats: { available: true, rating: null, reviews: "10,000+", url: "ubereats.com/store/india-quality-restaurant/_em3rLy_SvC58BCT7t4ujA" },
-          grubhub: { available: true, rating: null, reviews: null, url: "grubhub.com/restaurant/india-quality-restaurant-484-commonwealth-ave-boston/262705" },
-          postmates: { available: true, rating: null, reviews: null, url: null }
+          ubereats: { available: true, reviews: "10,000+", url: "ubereats.com/store/india-quality-restaurant/_em3rLy_SvC58BCT7t4ujA" },
+          grubhub: { available: true, url: "grubhub.com/restaurant/india-quality-restaurant-484-commonwealth-ave-boston/262705" },
+          postmates: { available: true }
         },
         reviewPlatforms: {
           yelp: { rating: 3.8, reviewCount: 923, url: "yelp.com/biz/india-quality-restaurant-boston" },
@@ -78,7 +145,6 @@ const RestaurantList: React.FC = () => {
       "Mela Modern Indian": {
         address: "578 Tremont Street, Boston, MA 02118 (South End)",
         phone: "(617) 859-4805",
-        email: null,
         website: "melainboston.com",
         established: 2007,
         ownershipType: "Independent (Asian-owned)",
@@ -92,14 +158,14 @@ const RestaurantList: React.FC = () => {
           "Daily Lunch Buffet": "11:30 AM - 3:00 PM"
         },
         deliveryPlatforms: {
-          doordash: { available: true, rating: 4.7, reviews: null, url: "doordash.com/store/mela-modern-indian-cuisine-boston-1827/" },
-          ubereats: { available: true, rating: null, reviews: null, url: "ubereats.com/store/mela/EEbN_9rDSwiRUTIwLseqTA" },
-          grubhub: { available: true, rating: null, reviews: null, url: "grubhub.com/restaurant/mela-indian-restaurant-578-tremont-st-boston/78573" },
-          postmates: { available: true, rating: null, reviews: null, url: "postmates.com/store/mela/EEbN_9rDSwiRUTIwLseqTA" }
+          doordash: { available: true, rating: 4.7, url: "doordash.com/store/mela-modern-indian-cuisine-boston-1827/" },
+          ubereats: { available: true, url: "ubereats.com/store/mela/EEbN_9rDSwiRUTIwLseqTA" },
+          grubhub: { available: true, url: "grubhub.com/restaurant/mela-indian-restaurant-578-tremont-st-boston/78573" },
+          postmates: { available: true, url: "postmates.com/store/mela/EEbN_9rDSwiRUTIwLseqTA" }
         },
         reviewPlatforms: {
           google: { rating: 4.0, reviewCount: 411, url: "google.com" },
-          yelp: { rating: null, reviewCount: 726, url: "yelp.com/biz/mela-boston-2" },
+          yelp: { reviewCount: 726, url: "yelp.com/biz/mela-boston-2" },
           tripadvisor: { rating: 4.0, reviewCount: 188, url: "tripadvisor.com", ranking: "#370 of 2,023 Boston restaurants" },
           opentable: { rating: 4.6, reviewCount: 449, url: "opentable.com" }
         },
@@ -113,9 +179,7 @@ const RestaurantList: React.FC = () => {
       "Halal Indian Cuisine": {
         address: "736 Huntington Ave, Boston, MA 02115 (Mission Hill)",
         phone: "(617) 232-5000",
-        email: null,
         website: "halalindiancuisineboston.com",
-        established: null,
         ownershipType: "Family-operated",
         cuisineType: "North Indian",
         priceRange: "$ - $$",
@@ -127,12 +191,12 @@ const RestaurantList: React.FC = () => {
           doordash: { available: true, rating: 4.5, reviews: "2,000+", url: "doordash.com/store/halal-indian-cuisine-boston-136555/" },
           ubereats: { available: true, rating: 4.5, reviews: "2,000+", url: "ubereats.com/store/halal-indian-cuisine/TTV2bwZqSEC9E4rPc6ZKWA" },
           postmates: { available: true, rating: 4.5, reviews: "2,000+", url: "postmates.com/store/halal-indian-cuisine/TTV2bwZqSEC9E4rPc6ZKWA" },
-          grubhub: { available: true, rating: null, reviews: null, url: "grubhub.com/restaurant/halal-indian-cuisine-736-huntington-ave-boston/786294" }
+          grubhub: { available: true, url: "grubhub.com/restaurant/halal-indian-cuisine-736-huntington-ave-boston/786294" }
         },
         reviewPlatforms: {
           yelp: { rating: 3.3, reviewCount: 148, url: "yelp.com/biz/halal-indian-cuisine-boston" },
           tripadvisor: { rating: 3.3, reviewCount: 3, url: "tripadvisor.com", ranking: "#1,869 of 2,019 Boston restaurants" },
-          google: { rating: 4.0, reviewCount: null, url: "google.com" }
+          google: { rating: 4.0, url: "google.com" }
         },
         features: ["Dine-in", "Takeout", "Delivery", "Catering", "Halal certified", "Vegetarian", "Vegan", "Tandoori oven", "Customizable spice levels"],
         popularDishes: ["Chicken Tikka Masala", "Chicken Biryani", "Butter Makhani", "Garlic Naan", "Goat Rogan Josh", "Samosas", "Saag Paneer", "Dal Makhani"],
@@ -144,7 +208,6 @@ const RestaurantList: React.FC = () => {
       "Shan A Punjab": {
         address: "500 Harvard St, Brookline, MA 02446",
         phone: "(617) 734-9000",
-        email: null,
         website: "shanapunjab.com",
         established: 2015,
         ownershipType: "Independent restaurant",
@@ -158,12 +221,12 @@ const RestaurantList: React.FC = () => {
         deliveryPlatforms: {
           doordash: { available: true, rating: 4.6, reviews: "4,000+", url: "doordash.com/store/shan-a-punjab-brookline-1281/" },
           ubereats: { available: true, rating: 4.6, reviews: "9,000+", url: "ubereats.com/store/shan-a-punjab/Dnqgzk1XSb-nXfzAASQMMQ" },
-          grubhub: { available: true, rating: null, reviews: null, url: "grubhub.com/restaurant/shan-a-punjab-500-harvard-st-brookline/285957" },
-          postmates: { available: true, rating: null, reviews: null, url: "postmates.com/store/shan-a-punjab/Dnqgzk1XSb-nXfzAASQMMQ" }
+          grubhub: { available: true, url: "grubhub.com/restaurant/shan-a-punjab-500-harvard-st-brookline/285957" },
+          postmates: { available: true, url: "postmates.com/store/shan-a-punjab/Dnqgzk1XSb-nXfzAASQMMQ" }
         },
         reviewPlatforms: {
-          google: { rating: 4.0, reviewCount: null, url: "google.com" },
-          yelp: { rating: null, reviewCount: 527, url: "yelp.com/biz/shan-a-punjab-brookline" },
+          google: { rating: 4.0, url: "google.com" },
+          yelp: { reviewCount: 527, url: "yelp.com/biz/shan-a-punjab-brookline" },
           tripadvisor: { rating: 4.0, reviewCount: 38, url: "tripadvisor.com", ranking: "#51 of 139 Brookline restaurants" },
           opentable: { rating: 4.1, reviewCount: 4, url: "opentable.com" }
         },
@@ -174,12 +237,11 @@ const RestaurantList: React.FC = () => {
         averageWaitTime: "15-20 minutes"
       },
 
-      "Ssaanjh": {
+      "Ssaanjh Modern Indian": {
         address: "1012 Beacon St, Brookline, MA 02446",
         phone: "(617) 786-5555",
         email: "ssaanjh.boston@gmail.com",
         website: "ssaanjh.com",
-        established: null,
         ownershipType: "Independent restaurant",
         cuisineType: "Modern Indian",
         priceRange: "$$",
@@ -188,334 +250,48 @@ const RestaurantList: React.FC = () => {
           "Monday-Sunday": "11:30 AM - 10:00 PM"
         },
         deliveryPlatforms: {
-          online_ordering: { available: true, rating: null, reviews: null, url: "ssaanjh.com/order" }
+          online_ordering: { available: true, url: "ssaanjh.com/order" }
         },
         reviewPlatforms: {
-          yelp: { rating: null, reviewCount: null, url: "yelp.com/biz/ssaanjh-indian-brookline" },
-          mapquest: { rating: null, reviewCount: null, url: "mapquest.com/us/massachusetts/ssaanjh-indian-697164321" }
+          yelp: { url: "yelp.com/biz/ssaanjh-indian-brookline" },
+          mapquest: { url: "mapquest.com/us/massachusetts/ssaanjh-indian-697164321" }
         },
         features: ["Dine-in", "Takeout", "Delivery", "Online ordering", "Vegetarian", "Vegan"],
         popularDishes: ["Chicken Tikka Masala", "Biryani", "Paneer dishes", "Naan", "Curry specialties"],
         awards: [],
         capacity: 60,
         averageWaitTime: "15-20 minutes"
-      },
-
-      "Wow Tikka": {
-        address: "84 Peterborough St, Boston, MA 02215 (Fenway)",
-        phone: "(857) 250-2062",
-        email: null,
-        website: "wowtikka.com",
-        established: null,
-        ownershipType: "Independent restaurant",
-        cuisineType: "Fast-Casual Indian",
-        priceRange: "$ - $$",
-        description: "Fast-casual Indian restaurant specializing in tikka dishes, bowls, and wraps with customizable options.",
-        businessHours: {
-          "Monday-Sunday": "11:00 AM - 10:00 PM"
-        },
-        deliveryPlatforms: {
-          online_ordering: { available: true, rating: null, reviews: null, url: "order.wowtikka.com" }
-        },
-        reviewPlatforms: {
-          yelp: { rating: null, reviewCount: null, url: "yelp.com/biz/wow-tikka-boston-2" }
-        },
-        features: ["Fast-casual", "Pickup", "Delivery", "Custom bowls", "Healthy options", "Vegetarian", "Vegan"],
-        popularDishes: ["Tikka bowls", "Chicken Tikka", "Custom wraps", "Biryani bowls", "Vegetable tikka"],
-        awards: [],
-        capacity: 40,
-        averageWaitTime: "5-15 minutes"
-      },
-
-      "Nachlo Cuisine": {
-        address: "1443 Tremont St, Boston, MA 02120",
-        phone: "(617) 397-3200",
-        email: null,
-        website: "nachloboston.com",
-        established: null,
-        ownershipType: "Independent restaurant",
-        cuisineType: "Pakistani & Fusion",
-        priceRange: "$ - $$",
-        description: "Pakistani and fusion cuisine featuring authentic Pakistani dishes alongside Mexican fusion options.",
-        businessHours: {
-          "Monday-Sunday": "11:00 AM - 11:00 PM"
-        },
-        deliveryPlatforms: {
-          online_ordering: { available: true, rating: null, reviews: null, url: "nachlocuisineroxbury.com" }
-        },
-        reviewPlatforms: {
-          yelp: { rating: null, reviewCount: null, url: "yelp.com/biz/nachlo-restaurant-roxbury-crossing" },
-          mapquest: { rating: null, reviewCount: null, url: "mapquest.com/us/massachusetts/nachlo-authentic-mexican-and-pakistani-cuisine-422755967" }
-        },
-        features: ["Dine-in", "Takeout", "Delivery", "Late hours", "Halal", "Vegetarian", "Fusion cuisine"],
-        popularDishes: ["Karahi dishes", "Biryani", "Kebabs", "Naan", "Fusion specialties"],
-        awards: [],
-        capacity: 50,
-        averageWaitTime: "15-25 minutes"
-      },
-
-      "Mumbai Spice": {
-        address: "251 Massachusetts Ave, Boston, MA 02115",
-        phone: "(857) 350-4305",
-        email: null,
-        website: "mumbaispicebostonma.com",
-        established: null,
-        ownershipType: "Independent restaurant",
-        cuisineType: "Indian",
-        priceRange: "$$",
-        description: "Traditional Indian cuisine featuring authentic Mumbai-style dishes and regional specialties.",
-        businessHours: {
-          "Monday-Sunday": "11:30 AM - 10:00 PM"
-        },
-        deliveryPlatforms: {
-          grubhub: { available: true, rating: null, reviews: null, url: "grubhub.com/restaurant/mumbai-spice-251-massachusetts-ave-boston/317625" }
-        },
-        reviewPlatforms: {
-          yelp: { rating: null, reviewCount: null, url: "yelp.com/biz/mumbai-spice-boston" },
-          opentable: { rating: null, reviewCount: null, url: "opentable.com/mumbai-spice-boston" }
-        },
-        features: ["Dine-in", "Takeout", "Delivery", "Reservations", "Vegetarian", "Vegan"],
-        popularDishes: ["Mumbai street food", "Curry specialties", "Biryani", "Tandoori items", "Dosa"],
-        awards: [],
-        capacity: 70,
-        averageWaitTime: "20-25 minutes"
-      },
-
-      "Sarva Indian Cuisine": {
-        address: "279 Newbury St, Boston, MA 02116",
-        phone: "(617) 418-4995",
-        email: null,
-        website: "sarvacuisine.com",
-        established: null,
-        ownershipType: "Independent restaurant",
-        cuisineType: "Modern Indian",
-        priceRange: "$$ - $$$",
-        description: "Upscale Indian dining on Newbury Street featuring contemporary Indian cuisine in an elegant setting.",
-        businessHours: {
-          "Monday-Sunday": "11:30 AM - 10:00 PM"
-        },
-        deliveryPlatforms: {
-          toast: { available: true, rating: null, reviews: null, url: "order.toasttab.com/online/sarva-279-newbury-st" }
-        },
-        reviewPlatforms: {
-          yelp: { rating: null, reviewCount: null, url: "yelp.com/biz/sarva-indian-cuisine-boston" }
-        },
-        features: ["Dine-in", "Pickup", "Delivery", "Upscale dining", "Newbury Street location", "Vegetarian", "Vegan"],
-        popularDishes: ["Contemporary curries", "Artisanal naan", "Premium biryani", "Tandoori specialties"],
-        awards: [],
-        capacity: 80,
-        averageWaitTime: "20-30 minutes"
-      },
-
-      "Don't Tell Aunty": {
-        address: "1080 Boylston St, Boston, MA 02115",
-        phone: "(617) 982-6152",
-        email: null,
-        website: "donttellaunty.com",
-        established: null,
-        ownershipType: "Independent restaurant",
-        cuisineType: "Indian Gastropub",
-        priceRange: "$$ - $$$",
-        description: "Modern Indian gastropub featuring creative Indian fusion dishes, craft cocktails, and live music in a vibrant atmosphere.",
-        businessHours: {
-          "Monday-Thursday": "5:00 PM - 12:00 AM",
-          "Friday-Saturday": "5:00 PM - 1:00 AM",
-          "Sunday": "11:00 AM - 12:00 AM (Brunch available)"
-        },
-        deliveryPlatforms: {},
-        reviewPlatforms: {
-          opentable: { rating: null, reviewCount: null, url: "opentable.com/r/dont-tell-auntie-boston" }
-        },
-        features: ["Gastropub", "Live music", "Reservations", "Brunch", "Late-night dining", "Craft cocktails", "Indian fusion"],
-        popularDishes: ["Fusion small plates", "Creative cocktails", "Modern Indian appetizers", "Brunch specialties"],
-        awards: [],
-        capacity: 100,
-        averageWaitTime: "25-35 minutes"
-      },
-
-      "Namastay Boston": {
-        address: "636 Beacon St, Boston, MA 02215 (Kenmore)",
-        phone: "(617) 377-4352",
-        email: null,
-        website: "namastayboston.com",
-        established: 2025,
-        ownershipType: "Independent restaurant",
-        cuisineType: "Modern Indian",
-        priceRange: "$$",
-        description: "Newly opened modern Indian restaurant in Kenmore area featuring fresh interpretations of classic dishes.",
-        businessHours: {
-          "Monday-Sunday": "11:30 AM - 10:00 PM"
-        },
-        deliveryPlatforms: {
-          toast: { available: true, rating: null, reviews: null, url: "namastayboston.com/menus/" }
-        },
-        reviewPlatforms: {
-          yelp: { rating: null, reviewCount: null, url: "yelp.com/biz/namastay-boston-boston-2" }
-        },
-        features: ["Dine-in", "Takeout", "Delivery", "New opening 2025", "Toast ordering", "Vegetarian", "Vegan"],
-        popularDishes: ["Modern curry preparations", "Artisan naan", "Contemporary biryani", "Fusion appetizers"],
-        awards: [],
-        capacity: 65,
-        averageWaitTime: "15-20 minutes"
-      },
-
-      "Mirchi Nation": {
-        address: "477 Harvard St, Brookline, MA 02446",
-        phone: "(617) 383-5934",
-        email: null,
-        website: "mirchination.com",
-        established: null,
-        ownershipType: "Multi-location chain",
-        cuisineType: "Indian Kitchen",
-        priceRange: "$ - $$",
-        description: "Fast-casual Indian kitchen concept with multiple locations, featuring customizable Indian bowls and wraps.",
-        businessHours: {
-          "Monday-Sunday": "11:00 AM - 10:00 PM"
-        },
-        deliveryPlatforms: {
-          online_ordering: { available: true, rating: null, reviews: null, url: "mirchination.com/brookline/" }
-        },
-        reviewPlatforms: {
-          yelp: { rating: null, reviewCount: null, url: "yelp.com/biz/mirchi-nation-indian-kitchen-brookline" }
-        },
-        features: ["Fast-casual", "Multiple locations", "Custom bowls", "Online ordering", "Quick service", "Vegetarian", "Vegan"],
-        popularDishes: ["Indian bowls", "Wraps", "Curry bowls", "Tikka items", "Customizable meals"],
-        awards: [],
-        capacity: 45,
-        averageWaitTime: "10-15 minutes"
-      },
-
-      "Vaisakhi Indian Kitchen": {
-        address: "157 Sutherland Rd, Brighton/Allston, Boston, MA 02135",
-        phone: "(617) 487-8941",
-        email: null,
-        website: "vaisakhiboston.com",
-        established: null,
-        ownershipType: "Independent restaurant",
-        cuisineType: "Punjabi",
-        priceRange: "$ - $$",
-        description: "Authentic Punjabi cuisine specializing in traditional dishes from the Punjab region of India.",
-        businessHours: {
-          "Monday-Sunday": "11:00 AM - 10:00 PM"
-        },
-        deliveryPlatforms: {
-          third_party: { available: true, rating: null, reviews: null, url: null }
-        },
-        reviewPlatforms: {
-          yelp: { rating: null, reviewCount: null, url: "yelp.com/biz/vaisakhi-indian-kitchen-boston-2" },
-          facebook: { rating: null, reviewCount: null, url: "facebook.com/vaisakhiboston/" }
-        },
-        features: ["Dine-in", "Takeout", "Delivery", "Punjabi specialties", "Traditional cooking", "Vegetarian", "Halal"],
-        popularDishes: ["Punjabi curries", "Tandoori items", "Lassi", "Traditional bread", "Dal preparations"],
-        awards: [],
-        capacity: 55,
-        averageWaitTime: "15-20 minutes"
-      },
-
-      "Madras Dosa Company": {
-        address: "22 Eliot St, Cambridge, MA 02138 (Harvard Square) & 55 Boston Wharf Rd, Boston, MA 02210 (Seaport)",
-        phone: "Harvard: (617) 714-5261; Seaport: (857) 233-5188",
-        email: null,
-        website: "madrasdosaco.com",
-        established: null,
-        ownershipType: "Multi-location restaurant",
-        cuisineType: "South Indian",
-        priceRange: "$ - $$",
-        description: "South Indian dosa specialists featuring authentic Tamil Nadu cuisine with multiple convenient locations.",
-        businessHours: {
-          "Monday-Sunday": "11:00 AM - 10:00 PM"
-        },
-        deliveryPlatforms: {},
-        reviewPlatforms: {
-          yelp: { rating: null, reviewCount: null, url: "yelp.com/biz/madras-dosa-cambridge" }
-        },
-        features: ["Multiple locations", "Dosa specialists", "South Indian cuisine", "Vegetarian", "Vegan", "Gluten-free options"],
-        popularDishes: ["Masala Dosa", "Sambar", "Rasam", "Uttapam", "Idli", "Vada", "South Indian thalis"],
-        awards: [],
-        capacity: 60,
-        averageWaitTime: "15-25 minutes"
-      },
-
-      "Singh's Dhaba": {
-        address: "1001 Massachusetts Ave, Cambridge, MA 02138",
-        phone: "(617) 945-1525",
-        email: null,
-        website: "singhsdhaba.com",
-        established: null,
-        ownershipType: "Independent restaurant",
-        cuisineType: "Punjabi Dhaba",
-        priceRange: "$ - $$",
-        description: "Traditional dhaba-style Punjabi restaurant featuring authentic roadside Indian cuisine in a casual setting.",
-        businessHours: {
-          "Monday-Sunday": "11:30 AM - 10:00 PM"
-        },
-        deliveryPlatforms: {},
-        reviewPlatforms: {
-          yelp: { rating: null, reviewCount: null, url: "yelp.com/biz/singhs-dhaba-cambridge" }
-        },
-        features: ["Dine-in", "Reservations", "Dhaba-style dining", "Traditional atmosphere", "Vegetarian", "Halal"],
-        popularDishes: ["Dhaba-style curries", "Tandoori rotis", "Punjabi classics", "Lassi", "Traditional dal"],
-        awards: [],
-        capacity: 50,
-        averageWaitTime: "15-20 minutes"
-      },
-
-      "Momo Masala": {
-        address: "2 Perkins St, Jamaica Plain, Boston, MA 02130",
-        phone: "(617) [see listing]",
-        email: null,
-        website: "momomasalausa.com",
-        established: null,
-        ownershipType: "Independent restaurant",
-        cuisineType: "Nepali",
-        priceRange: "$ - $$",
-        description: "Authentic Nepali cuisine specializing in traditional momos (dumplings) and other Himalayan dishes.",
-        businessHours: {
-          "Monday-Sunday": "11:00 AM - 10:00 PM"
-        },
-        deliveryPlatforms: {
-          grubhub: { available: true, rating: null, reviews: null, url: "grubhub.com/restaurant/momo-masala-2-perkins-st-boston/7502640" }
-        },
-        reviewPlatforms: {
-          yelp: { rating: null, reviewCount: null, url: "yelp.com/biz/momo-masala-boston" }
-        },
-        features: ["Dine-in", "Takeout", "Delivery", "Nepali specialties", "Momo dumplings", "Vegetarian", "Authentic Himalayan"],
-        popularDishes: ["Chicken momos", "Vegetable momos", "Thukpa", "Dal bhat", "Nepali curries", "Chow mein"],
-        awards: [],
-        capacity: 40,
-        averageWaitTime: "15-20 minutes"
       }
     };
 
-    // Get real data for the restaurant, with fallbacks to your API data
-    const realData = restaurantData[restaurant.name];
-    if (!realData) {
-      // If restaurant not in our directory, use basic API data
-      return {
-        ...restaurant,
-        address: restaurant.address || "Address not available",
-        phone: restaurant.phone || "Phone not available",
-        email: restaurant.email || null,
-        website: restaurant.url || "Website not available",
-        established: restaurant.established_year || "Year not available",
-        ownershipType: restaurant.ownership_type || "Ownership not available",
-        cuisineType: restaurant.cuisine_type || "Indian",
-        priceRange: restaurant.price_range || "$$",
-        description: restaurant.description || "Authentic Indian cuisine.",
-        businessHours: restaurant.business_hours || { "Monday-Sunday": "11:00 AM - 10:00 PM" },
-        deliveryPlatforms: restaurant.delivery_platforms || {},
-        reviewPlatforms: restaurant.review_platforms || {},
-        features: restaurant.features || ["Dine-in", "Takeout", "Delivery"],
-        popularDishes: restaurant.popular_dishes || ["Chicken Tikka Masala", "Biryani", "Naan"],
-        awards: restaurant.awards || [],
-        capacity: restaurant.capacity || 50,
-        averageWaitTime: restaurant.avg_wait_time || "15-20 minutes"
-      };
-    }
-
+    // Get real data for the restaurant, with fallbacks to API data
+    const realData = restaurantData[restaurant.name] || {};
+    
     return {
-      ...restaurant,
-      ...realData
+      name: restaurant.name,
+      address: realData.address || restaurant.address || "Address not available",
+      phone: realData.phone || "Phone not available",
+      email: realData.email || null,
+      website: realData.website || restaurant.url || "Website not available",
+      established: realData.established || "Year not available",
+      ownershipType: realData.ownershipType || "Ownership not available",
+      cuisineType: realData.cuisineType || "Indian",
+      priceRange: realData.priceRange || "$$",
+      description: realData.description || "Authentic Indian cuisine.",
+      businessHours: realData.businessHours || { "Monday-Sunday": "11:00 AM - 10:00 PM" },
+      deliveryPlatforms: realData.deliveryPlatforms || {},
+      reviewPlatforms: realData.reviewPlatforms || {},
+      features: realData.features || ["Dine-in", "Takeout", "Delivery"],
+      popularDishes: realData.popularDishes || ["Chicken Tikka Masala", "Biryani", "Naan"],
+      awards: realData.awards || [],
+      capacity: realData.capacity || 50,
+      averageWaitTime: realData.averageWaitTime || "15-20 minutes",
+      // Include API data for analytics
+      menu_items_count: restaurant.menu_items_count,
+      categories_count: restaurant.categories_count,
+      review_sources_count: restaurant.review_sources_count,
+      reviews_last_scraped: restaurant.reviews_last_scraped,
+      sentiment_score: restaurant.sentiment_score
     };
   };
 
@@ -547,15 +323,15 @@ const RestaurantList: React.FC = () => {
           const bDate = b.reviews_last_scraped ? new Date(b.reviews_last_scraped) : new Date(0);
           return bDate.getTime() - aDate.getTime();
         case 'items':
-          return b.menu_items_count - a.menu_items_count;
+          return safeNumber(b.menu_items_count) - safeNumber(a.menu_items_count);
         case 'sources':
-          return b.review_sources_count - a.review_sources_count;
+          return safeNumber(b.review_sources_count) - safeNumber(a.review_sources_count);
         default:
           return 0;
       }
     });
 
-  const handleRestaurantClick = async (restaurant: any) => {
+  const handleRestaurantClick = async (restaurant: Restaurant) => {
     const detailedRestaurant = getRestaurantDetails(restaurant);
     setSelectedRestaurant(detailedRestaurant);
     await fetchRestaurant(restaurant.name);
@@ -570,7 +346,7 @@ const RestaurantList: React.FC = () => {
     }
   };
 
-  const getStatusColor = (restaurant: any) => {
+  const getStatusColor = (restaurant: Restaurant) => {
     if (!restaurant.reviews_last_scraped) return 'bg-slate-400';
     
     const lastUpdate = new Date(restaurant.reviews_last_scraped);
@@ -582,7 +358,7 @@ const RestaurantList: React.FC = () => {
     return 'bg-red-500';
   };
 
-  const getStatusText = (restaurant: any) => {
+  const getStatusText = (restaurant: Restaurant) => {
     if (!restaurant.reviews_last_scraped) return 'Never updated';
     
     const lastUpdate = new Date(restaurant.reviews_last_scraped);
@@ -595,7 +371,7 @@ const RestaurantList: React.FC = () => {
     return 'Needs update';
   };
 
-  const getStatusIcon = (restaurant: any) => {
+  const getStatusIcon = (restaurant: Restaurant) => {
     if (!restaurant.reviews_last_scraped) return <XCircle className="w-4 h-4" />;
     
     const lastUpdate = new Date(restaurant.reviews_last_scraped);
@@ -714,7 +490,7 @@ const RestaurantList: React.FC = () => {
         </motion.div>
 
         {/* Delivery Platforms */}
-        {selectedRestaurant.deliveryPlatforms && Object.keys(selectedRestaurant.deliveryPlatforms).length > 0 && (
+        {Object.keys(selectedRestaurant.deliveryPlatforms).length > 0 && (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -768,7 +544,7 @@ const RestaurantList: React.FC = () => {
         )}
 
         {/* Review Platforms */}
-        {selectedRestaurant.reviewPlatforms && Object.keys(selectedRestaurant.reviewPlatforms).length > 0 && (
+        {Object.keys(selectedRestaurant.reviewPlatforms).length > 0 && (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -918,23 +694,23 @@ const RestaurantList: React.FC = () => {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
             <div className="text-center p-4 bg-blue-50 rounded-lg">
               <BarChart3 className="w-8 h-8 text-blue-600 mx-auto mb-2" />
-              <p className="text-2xl font-bold text-blue-700">{selectedRestaurant.menu_items_count}</p>
+              <p className="text-2xl font-bold text-blue-700">{safeNumber(selectedRestaurant.menu_items_count)}</p>
               <p className="text-sm text-blue-600">Menu Items</p>
             </div>
             <div className="text-center p-4 bg-green-50 rounded-lg">
               <Users className="w-8 h-8 text-green-600 mx-auto mb-2" />
-              <p className="text-2xl font-bold text-green-700">{selectedRestaurant.categories_count || 0}</p>
+              <p className="text-2xl font-bold text-green-700">{safeNumber(selectedRestaurant.categories_count)}</p>
               <p className="text-sm text-green-600">Categories</p>
             </div>
             <div className="text-center p-4 bg-purple-50 rounded-lg">
               <Star className="w-8 h-8 text-purple-600 mx-auto mb-2" />
-              <p className="text-2xl font-bold text-purple-700">{selectedRestaurant.review_sources_count}</p>
+              <p className="text-2xl font-bold text-purple-700">{safeNumber(selectedRestaurant.review_sources_count)}</p>
               <p className="text-sm text-purple-600">Review Sources</p>
             </div>
             <div className="text-center p-4 bg-orange-50 rounded-lg">
               <TrendingUp className="w-8 h-8 text-orange-600 mx-auto mb-2" />
               <p className="text-2xl font-bold text-orange-700">
-                {selectedRestaurant.sentiment_score !== null ? 
+                {selectedRestaurant.sentiment_score !== null && selectedRestaurant.sentiment_score !== undefined ? 
                   `${(selectedRestaurant.sentiment_score * 100).toFixed(0)}%` : 
                   'N/A'
                 }
@@ -1135,7 +911,7 @@ const RestaurantList: React.FC = () => {
                     <div className="text-center p-4 bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl border border-blue-100/50">
                       <BarChart3 className="w-4 h-4 text-blue-600 mx-auto mb-2" />
                       <p className="text-2xl font-bold text-blue-700">
-                        {restaurant.menu_items_count.toLocaleString()}
+                        {safeLocaleString(restaurant.menu_items_count)}
                       </p>
                       <p className="text-xs text-blue-600 font-medium">Menu Items</p>
                     </div>
@@ -1143,7 +919,7 @@ const RestaurantList: React.FC = () => {
                     <div className="text-center p-4 bg-gradient-to-br from-purple-50 to-pink-50 rounded-xl border border-purple-100/50">
                       <Users className="w-4 h-4 text-purple-600 mx-auto mb-2" />
                       <p className="text-2xl font-bold text-purple-700">
-                        {restaurant.categories_count}
+                        {safeNumber(restaurant.categories_count)}
                       </p>
                       <p className="text-xs text-purple-600 font-medium">Categories</p>
                     </div>
@@ -1153,10 +929,10 @@ const RestaurantList: React.FC = () => {
                   <div className="mb-6">
                     <p className="text-sm text-gray-600 mb-2">Review Sources</p>
                     <div className="flex items-center space-x-2">
-                      {restaurant.review_sources_count > 0 ? (
+                      {safeNumber(restaurant.review_sources_count) > 0 ? (
                         <span className="px-2 py-1 bg-green-100 text-green-800 rounded-full text-xs font-medium flex items-center space-x-1">
                           <Star className="w-3 h-3" />
-                          <span>{restaurant.review_sources_count} active</span>
+                          <span>{safeNumber(restaurant.review_sources_count)} active</span>
                         </span>
                       ) : (
                         <span className="px-2 py-1 bg-slate-100 text-slate-600 rounded-full text-xs font-medium flex items-center space-x-1">

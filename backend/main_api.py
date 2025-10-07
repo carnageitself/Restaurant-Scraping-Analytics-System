@@ -1,9 +1,3 @@
-#!/usr/bin/env python3
-"""
-Real-Time Restaurant Scraping Backend with Live Log Streaming
-All backend activity is broadcasted to frontend in real-time
-"""
-
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 import asyncio
